@@ -63,8 +63,8 @@ for step in range(training_params['training_iterations']):
     ######
  
     phase_data_generator = bit_flip.bit_flip_simulation(num_paths=5000, params=simulation_params, a_list=protocol_params['a_list'], b_list=protocol_params['b_list'], a_endpoints=protocol_params['a_endpoints'], b_endpoints=protocol_params['b_list'])
-    left_phase_data, left_noise=phase_data_generator.left_trajectory_generatetor()
-    right_phase_data, right_noise = phase_data_generator.right_trajectory_generatetor()
+    left_phase_data, left_noise=phase_data_generator.left_trajectory_generator()
+    right_phase_data, right_noise = phase_data_generator.right_trajectory_generator()
 
     grad_left =  bit_flip.bit_flip_gradient_tensor_comp(simulation_params, left_phase_data, left_noise, a_list=protocol_params['a_list'], b_list=protocol_params['b_list'], a_endpoints=protocol_params['a_endpoints'], b_endpoints=protocol_params['b_endpoints'])
     grad_right =  bit_flip.bit_flip_gradient_tensor_comp(simulation_params, right_phase_data, right_noise, a_list=protocol_params['a_list'], b_list=protocol_params['b_list'], a_endpoints=protocol_params['a_endpoints'], b_endpoints=protocol_params['b_endpoints'])

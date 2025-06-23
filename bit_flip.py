@@ -213,8 +213,8 @@ class bit_flip_gradient_tensor_comp:
             Dimensions: (num_paths, num_steps - 1)
         """
     
-        protocol_a_advance= self.piecewise_protocol_value(self.a_list, self.a_endpoints)[1:]
-        protocol_b_advance= self.piecewise_protocol_value(self.b_list, self.b_endpoints)[1:]
+        protocol_a_advance = self.piecewise_protocol_value(self.a_list, self.a_endpoints)[1:]
+        protocol_b_advance = self.piecewise_protocol_value(self.b_list, self.b_endpoints)[1:]
         potential_advance = protocol_a_advance*self.phase_data[:,:-1,0]**4 - protocol_b_advance * self.phase_data[:,:-1,0]**2 
         return potential_advance
     
@@ -437,7 +437,7 @@ class bit_flip_simulation:
         samples = torch.randn(self.num_paths, device=self.torch_device) * math.sqrt(var)
         return samples
     
-    def left_trajectory_generatetor(self):
+    def trajectory_generator(self, position_sampler):
         """
         Generates trajectories with protocol.
         The potential has the form V(x,t) = a(t) x^4 - b(t)x^2.
@@ -445,17 +445,6 @@ class bit_flip_simulation:
         The initial potential is 5x^4- 10x^2 and the final potential is 5x^4- 10x^2 .
         The initial distribution is at equilibrium with the initial potential. 
         
-
-        Args:
-            num_steps (int): Number of steps in the trajectory.
-            dt : Time step size.
-            num_paths (int): Number of paths to generate.
-            a_list (torch tensor): the coefficient of the protocol a.
-            b_list (torch tensor): the coefficient of the protocol b.
-            a_endpoints (torch tensor): the endpoints of the protocol a.
-            b_endpoints (torch tensor): the endpoints of the protocol b.
-            sigma (float): Standard deviation of the noise.
-            beta (float): Inverse temperature.
 
         Returns:
             trajectory array and the noise array with [path_index , step_index].
@@ -465,11 +454,12 @@ class bit_flip_simulation:
         dt = self.params['dt']
         gamma = self.params['gamma']
         noise_sigma = self.params['noise_sigma']
+
         protocol_a_value = self.piecewise_protocol_value(self.a_list, self.a_endpoints)
         protocol_b_value = self.piecewise_protocol_value(self.b_list, self.b_endpoints)
         noise_array = torch.randn(self.num_paths, num_steps, device=self.torch_device) * (noise_sigma * math.sqrt(self.params['dt']))
         phase_array = torch.zeros((self.num_paths, num_steps + 1, 2), device=self.torch_device) # 2 for position and velocity
-        phase_array[:, 0, 0] = self.left_sample_distribution() # initial position
+        phase_array[:, 0, 0] = position_sampler() # initial position
         phase_array[:, 0, 1] = self.velocity_sample_distribution() # initial velocity
         for i in range(num_steps):
             # Update position using the Euler-Maruyama method
@@ -479,22 +469,9 @@ class bit_flip_simulation:
             phase_array[:,i + 1, 1] = phase_array[:, i, 1] - dt * gamma * phase_array[:, i, 1] - dt * (4 * protocol_a_value[i] * phase_array[:, i, 0]**3 - 2 * protocol_b_value[i] * phase_array[:,i,0] ) + noise_array[:,i]
         return phase_array, noise_array
     
-    def right_trajectory_generatetor(self):
-        num_steps = self.params['num_steps']
-        dt = self.params['dt']
-        gamma = self.params['gamma']
-        noise_sigma = self.params['noise_sigma']
-            
-        protocol_a_value = self.piecewise_protocol_value(self.a_list, self.a_endpoints)
-        protocol_b_value = self.piecewise_protocol_value(self.b_list, self.b_endpoints)
-        noise_array = torch.randn(self.num_paths, num_steps, device=self.torch_device) * (noise_sigma * math.sqrt(self.params['dt']))
-        phase_array = torch.zeros((self.num_paths, num_steps + 1, 2), device=self.torch_device)
-        phase_array[:, 0, 0] = self.right_sample_distribution()
-        phase_array[:, 0, 1] = self.velocity_sample_distribution()
-        for i in range(num_steps):
-            # Update position using the Euler-Maruyama method
-            # dx = v * dt
-            # dv = -gamma * v + ( 4*b*x - 4*a*x^3) * dt + noise
-            phase_array[:,i + 1, 0] = phase_array[:, i, 0] + dt * phase_array[:, i, 1]
-            phase_array[:,i + 1, 1] = phase_array[:, i, 1] - dt * gamma * phase_array[:, i, 1] - dt * (4 * protocol_a_value[i] * phase_array[:, i, 0]**3 - 2 * protocol_b_value[i] * phase_array[:,i,0] ) + noise_array[:,i]
-        return phase_array, noise_array
+    def left_trajectory_generator(self):
+        return self.trajectory_generator(self.left_sample_distribution)
+    
+    def right_trajectory_generator(self):
+        return self.trajectory_generator(self.right_sample_distribution)
+    
