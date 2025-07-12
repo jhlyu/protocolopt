@@ -3,7 +3,7 @@ import gc
 import os
 import json
 import numpy as np
-import bit_flip
+import bit_flip_kyle as bit_flip
 import yaml
 import math
 
@@ -16,14 +16,19 @@ simulation_params = config["simulation_params"]
 protocol_params = config["protocol_params"]
 training_params = config["training_params"]
 
+save_dir = config['save_directory']
+if not os.path.exists(save_dir):
+    os.makedirs(save_dir)
+
 simulation_params['noise_sigma'] = math.sqrt(2 * simulation_params['gamma'] / simulation_params['beta'])  # od Einstein relation
 centers = math.sqrt(protocol_params['b_endpoints'][0]/(2*protocol_params['a_endpoints'][0]))
 local_var = 1/(4 * protocol_params['b_endpoints'][0] * simulation_params['beta'])
 
 
 torch_device = torch.device('cuda' if torch.cuda.is_available() else 'mps')
-if os.path.exists('training_metrics.json'):
-    with open( 'training_metrics.json', 'r') as f:
+
+if os.path.exists(save_dir + 'training_metrics.json'):
+    with open( save_dir + 'training_metrics.json', 'r') as f:
         metrics = json.load(f)
     mean_distance_list = metrics['mean_distance_list']
     var_distance_list = metrics['var_distance_list']
@@ -41,8 +46,8 @@ else:
     b_list_history = []
     print("Initialized new training metrics.")
 # Load or initialize alist and blist
-if os.path.exists('work_checkpoint.pt'):
-    checkpoint = torch.load('work_checkpoint.pt', weights_only=True)
+if os.path.exists(save_dir + 'work_checkpoint.pt'):
+    checkpoint = torch.load(save_dir + 'work_checkpoint.pt', weights_only=True)
     
     protocol_params['a_list'] = checkpoint['a_list'].to(torch_device).requires_grad_()
     protocol_params['b_list']= checkpoint['b_list'].to(torch_device).requires_grad_()
@@ -203,7 +208,7 @@ metrics = {
         'a_list_history': a_list_history,
         'b_list_history': b_list_history
     }
-with open('training_metrics.json', 'w') as f:
+with open(save_dir + 'training_metrics.json', 'w') as f:
     json.dump(metrics, f)
 
 
@@ -212,5 +217,5 @@ torch.save({
     'b_list': protocol_params['b_list'],
     'optimizer_b_dict': optimizer_b.state_dict(),
     'optimizer_a_dict': optimizer_a.state_dict(),
-}, 'work_checkpoint.pt')
+}, save_dir + 'work_checkpoint.pt')
 print("Checkpoint saved. Please restart kernel before next run.")

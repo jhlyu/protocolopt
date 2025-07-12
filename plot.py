@@ -20,13 +20,25 @@ simulation_params = config["simulation_params"]
 protocol_params = config["protocol_params"]
 training_params = config["training_params"]
 
+save_dir = config['save_directory'] 
+plot_dir = save_dir + 'plots/' 
+
+if not os.path.exists(save_dir):
+    os.makedirs(save_dir)
+if not os.path.exists(plot_dir):
+    os.makedirs(plot_dir)
+
+
 protocol_params['b_endpoints'] = torch.tensor(protocol_params['b_endpoints'], device='cpu', dtype=torch.float32)
 protocol_params['a_endpoints'] = torch.tensor(protocol_params['a_endpoints'], device='cpu', dtype=torch.float32)
 simulation_params['beta'] = torch.tensor(simulation_params['beta'], device='cpu', dtype=torch.float32)
 simulation_params['noise_sigma'] = math.sqrt(2 * simulation_params['gamma'] / simulation_params['beta'])
 
-if os.path.exists('training_metrics.json'):
-    with open( 'training_metrics.json', 'r') as f:
+
+
+
+if os.path.exists(save_dir + 'training_metrics.json'):
+    with open( save_dir + 'training_metrics.json', 'r') as f:
         metrics = json.load(f)
     mean_distance_list = metrics['mean_distance_list']
     var_distance_list = metrics['var_distance_list']
@@ -35,8 +47,8 @@ if os.path.exists('training_metrics.json'):
 else:
     print("No available training metrics to plot.")
 
-if os.path.exists('work_checkpoint.pt'):
-    checkpoint = torch.load('work_checkpoint.pt',weights_only=True)
+if os.path.exists(save_dir + 'work_checkpoint.pt'):
+    checkpoint = torch.load(save_dir + 'work_checkpoint.pt',weights_only=True)
     
     protocol_params['a_list'] = checkpoint['a_list'].to(torch_device).requires_grad_()
     protocol_params['b_list']= checkpoint['b_list'].to(torch_device).requires_grad_()
@@ -63,7 +75,7 @@ def protocol_plot():
     ax[1].set_xlabel('Time step')
     ax[1].set_ylabel('b(t)')
     # Save the figure
-    fig.savefig('protocol_plot.png', dpi=300, bbox_inches='tight')
+    fig.savefig(plot_dir + f'protocol_plot_{len(mean_distance_list)}.png', dpi=300, bbox_inches='tight')
     #plt.show()
 
 def loss_plot():
@@ -82,7 +94,7 @@ def loss_plot():
     #ax[2].set_title('work')
     ax[2].set_xlabel('Step')
     ax[2].set_ylabel('work')
-    plt.savefig(f"mean_var_work_{training_params['alpha']}_{training_params['alpha_1']}_{training_params['alpha_2']}_{len(mean_distance_list)}.png", dpi=300)
+    plt.savefig(plot_dir + f"mean_var_work_{training_params['alpha']}_{training_params['alpha_1']}_{training_params['alpha_2']}_{len(mean_distance_list)}.png", dpi=300)
     #plt.show()
 
 def position_traj_plot(num_plot=1000):
@@ -98,7 +110,7 @@ def position_traj_plot(num_plot=1000):
     ax.set_title('Trajectories')
     ax.set_xlabel('Time')
     ax.set_ylabel('Position')
-    plt.savefig(f"trajectories_flip_position__{training_params['alpha']}_{training_params['alpha_1']}_{training_params['alpha_2']}_{len(mean_distance_list)}.png", dpi=300)
+    plt.savefig(plot_dir+f"trajectories_flip_position__{training_params['alpha']}_{training_params['alpha_1']}_{training_params['alpha_2']}_{len(mean_distance_list)}.png", dpi=300)
     #plt.show()
 
 def phase_traj_plot(num_plot=1000):
@@ -124,7 +136,7 @@ def phase_traj_plot(num_plot=1000):
     ax[1].set_title('Phase Space: Right Trajectory')
     ax[1].grid(True)
 
-    plt.savefig(f"phase_space_flip_{training_params['alpha']}_{training_params['alpha_1']}_{training_params['alpha_2']}_{len(mean_distance_list)}.png", dpi=300)
+    plt.savefig(plot_dir + f"phase_space_flip_{training_params['alpha']}_{training_params['alpha_1']}_{training_params['alpha_2']}_{len(mean_distance_list)}.png", dpi=300)
     #plt.show()
 
 def initial_final_distribution_plot():
@@ -143,7 +155,7 @@ def initial_final_distribution_plot():
     ax[1,1].set_title('Final Right Distribution')
 
     x = np.linspace(-3, 3, 1000)
-    plt.savefig(f"distribution_{training_params['alpha']}_{training_params['alpha_1']}_{training_params['alpha_2']}_{len(mean_distance_list)}.png", dpi=300)
+    plt.savefig(plot_dir + f"distribution_{training_params['alpha']}_{training_params['alpha_1']}_{training_params['alpha_2']}_{len(mean_distance_list)}.png", dpi=300)
 
 
 def work_distribution_plot():
@@ -159,7 +171,7 @@ def work_distribution_plot():
     ax.set_xlabel('Work')
     ax.set_ylabel('Density')
     ax.legend()
-    plt.savefig(f"work_distribution_{training_params['alpha']}_{training_params['alpha_1']}_{training_params['alpha_2']}_{len(mean_distance_list)}.png", dpi=300)
+    plt.savefig(plot_dir + f"work_distribution_{training_params['alpha']}_{training_params['alpha_1']}_{training_params['alpha_2']}_{len(mean_distance_list)}.png", dpi=300)
 
 
 def phase_animation_plot():
@@ -201,7 +213,7 @@ def phase_animation_plot():
     #HTML(ani.to_jshtml())
 
     # To save the animation (optional):
-    ani.save("phase_space_animation.mp4", writer='ffmpeg', fps=120)
+    ani.save(plot_dir+"phase_space_animation.mp4", writer='ffmpeg', fps=120)
 
     plt.show()
 
@@ -264,7 +276,7 @@ def position_animation_plot():
 
     # Save to video
     writer = FFMpegWriter(fps=60, metadata=dict(artist='Me'), bitrate=1800)
-    ani.save(f"potential_flip_{training_params['alpha']}_{training_params['alpha_1']}_{training_params['alpha_2']}_{len(mean_distance_list)}.mp4", writer=writer, dpi=100)
+    ani.save(plot_dir + f"potential_flip_{training_params['alpha']}_{training_params['alpha_1']}_{training_params['alpha_2']}_{len(mean_distance_list)}.mp4", writer=writer, dpi=100)
 
 def plot_all():
     protocol_plot()

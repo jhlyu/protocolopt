@@ -17,4 +17,6 @@ protocol_params:
   num_coefficient: 20
   a_endpoints: [10.0, 10.0]
   b_endpoints: [20.0, 20.0]
+
+save_directory: './results/'
   
