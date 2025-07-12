@@ -1671,3 +1671,116 @@ class bit_flip:
         dv_db = -1*self.phase_data[:,:-1,0]**2 
         return dv_db
     
+class bit_erasure:
+    """
+    The potential is V(x) = a * x^4 - b * x^2 + c * x
+    The potential gradients are d_a V = x^4, d_b V = -x^2, d_c V = x
+    The drift is F = -d_x V = -4 * a * x^3 + 2 * b * x - c
+    The drift gradients are d_a F = -4 * x^3, d_b F = 2 * x, d_c F = -1
+    """
+  
+    def __init__(self, params, phase_data, a_list, b_list, c_list, a_endpoints, b_endpoints, c_endpoints):
+        self.params = params
+        self.phase_data = phase_data
+        self.num_steps = phase_data.shape[1] - 1  # Adjust for zero-based indexing
+        self.num_paths = phase_data.shape[0]
+        self.a_list = a_list
+        self.b_list = b_list
+        self.c_list = c_list
+        self.a_endpoints = a_endpoints
+        self.b_endpoints = b_endpoints
+        self.c_endpoints = c_endpoints
+        self.torch_device = torch.device('cuda' if torch.cuda.is_available() else 'mps')
+        self.protocol_a = piecewise_protocol_value(self.num_steps,self.a_list, self.a_endpoints)
+        self.protocol_b = piecewise_protocol_value(self.num_steps,self.b_list, self.b_endpoints)
+        self.protocol_c = piecewise_protocol_value(self.num_steps,self.c_list, self.c_endpoints)
+        self.protocol_a_advance = self.protocol_a[1:]
+        self.protocol_b_advance = self.protocol_b[1:]
+        self.protocol_c_advance = self.protocol_c[1:]
+
+    def potential_value_array(self):
+        """
+        Calculate the potential value at phase position x and time t with output being same as position array.
+        x[:,:,0] is the position at time t, and x[:,:,1] is the velocity at time t.
+        """
+
+        potential = self.protocol_a * self.phase_data[:,:,0]**4 -  self.protocol_b * self.phase_data[:,:,0]**2 + self.protocol_c * self.phase_data[:,:,0]
+        return potential
+
+    def potential_value_advance_array(self):
+        """
+        Calculate the potential value at position x and time t+dt with output being same as position array but chopped the last column.
+
+
+        Returns:
+            ndarray: Array of advance potential values.
+            Dimensions: (num_paths, num_steps - 1)
+        """
+
+        potential_advance = self.protocol_a_advance*self.phase_data[:,:-1,0]**4 - self.protocol_b_advance * self.phase_data[:,:-1,0]**2 + self.protocol_c_advance * self.phase_data[:,:-1,0]
+        return potential_advance
+    
+    def drift_grad_a_array(self):
+        """
+        Calculate the drift gradient at position x and time t with output being same as position array.
+        dF/da = -4 * x^3 
+        """
+        dF_da = -4*self.phase_data[:,:,0]**3
+        return dF_da
+    def drift_grad_b_array(self):
+        """
+        Calculate the drift gradient at position x and time t with output being same as position array.
+        dF/db = 2 * x
+        """
+        dF_db = 2*self.phase_data[:,:,0]
+        return dF_db
+    def drift_grad_c_array(self):
+        """
+        Calculate the drift gradient at position x and time t with output being same as position array.
+        dF/dc = -1
+        """
+        dF_dc = -1 * torch.ones_like(self.phase_data[:,:,0])
+        return dF_dc
+    
+    def potential_grad_a_value_array(self):
+        """
+        Calculate the potential gradient at position x and time t with output being same as position array.
+        dV/da = x^4
+        """
+        dV_da = self.phase_data[:,:,0]**4
+        return dV_da
+    def potential_grad_b_value_array(self):
+        """
+        Calculate the potential gradient at position x and time t with output being same as position array.
+        dV/db = -x^2
+        """
+        dV_db = -self.phase_data[:,:,0]**2
+        return dV_db
+    def potential_grad_c_value_array(self):
+        """
+        Calculate the potential gradient at position x and time t with output being same as position array.
+        dV/dc = x
+        """
+        dV_dc = self.phase_data[:,:,0]
+        return dV_dc
+    def potential_grad_a_value_advance_array(self):
+        """
+        Calculate the potential gradient at position x and time t+dt with output being same as position array but chopped the last column.
+        dV/da = x^4
+        """
+        dV_da_advance = self.phase_data[:,:-1,0]**4
+        return dV_da_advance
+    def potential_grad_b_value_advance_array(self):
+        """
+        Calculate the potential gradient at position x and time t+dt with output being same as position array but chopped the last column.
+        dV/db = -x^2
+        """
+        dV_db_advance = -self.phase_data[:,:-1,0]**2
+        return dV_db_advance
+    def potential_grad_c_value_advance_array(self):
+        """
+        Calculate the potential gradient at position x and time t+dt with output being same as position array but chopped the last column.
+        dV/dc = x
+        """
+        dV_dc_advance = self.phase_data[:,:-1,0]
+        return dV_dc_advance
