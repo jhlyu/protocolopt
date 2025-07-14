@@ -6,16 +6,17 @@ simulation_params:
   beta: 1.0                  # 1 / kBT
 
 training_params:
-  alpha: 1.0
+  alpha: 2.0
   alpha_1: 10.0
-  alpha_2: 0.0
-  learning_rate: 0.1
+  alpha_2: .5
+  learning_rate: 0.2
   batch_size: 10000
-  training_iterations: 100
+  training_iterations: 50
 
 protocol_params:
   num_coefficient: 10
   a_endpoints: [10.0, 10.0]
   b_endpoints: [20.0, 20.0]
   c_endpoints: [0.0, 0.0]
-  
+
+save_directory: "./results/"  

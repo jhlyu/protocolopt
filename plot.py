@@ -9,7 +9,7 @@ import os
 import json
 import math
 import yaml
-import bit_flip
+import opt_kyle as bit_flip
 
 torch_device = torch.device('cuda' if torch.cuda.is_available() else 'mps')
 

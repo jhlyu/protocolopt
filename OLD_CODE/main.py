@@ -69,12 +69,13 @@ for step in range(training_params['training_iterations']):
     grad_left =  bit_flip.bit_flip_gradient_tensor_comp(simulation_params, left_phase_data, left_noise, a_list=protocol_params['a_list'], b_list=protocol_params['b_list'], a_endpoints=protocol_params['a_endpoints'], b_endpoints=protocol_params['b_endpoints'])
     grad_right =  bit_flip.bit_flip_gradient_tensor_comp(simulation_params, right_phase_data, right_noise, a_list=protocol_params['a_list'], b_list=protocol_params['b_list'], a_endpoints=protocol_params['a_endpoints'], b_endpoints=protocol_params['b_endpoints'])
 
+    cntr = simulation_params['center']
 
-    mean_grad_a_left =  2*(left_phase_data[:,-1,0].mean() - 1) * grad_left.x_mean_grad(grad_left.drift_grad_a_array())
-    mean_grad_a_right = 2*(right_phase_data[:,-1,0].mean() + 1) * grad_right.x_mean_grad(grad_right.drift_grad_a_array())
+    mean_grad_a_left =  2*(left_phase_data[:,-1,0].mean() - cntr) * grad_left.x_mean_grad(grad_left.drift_grad_a_array())
+    mean_grad_a_right = 2*(right_phase_data[:,-1,0].mean() + cntr) * grad_right.x_mean_grad(grad_right.drift_grad_a_array())
 
-    mean_grad_b_left = 2*(left_phase_data[:,-1,0].mean() - 1) * grad_left.x_mean_grad(grad_left.drift_grad_b_array())
-    mean_grad_b_right = 2*(right_phase_data[:,-1,0].mean() + 1) * grad_right.x_mean_grad(grad_right.drift_grad_b_array())
+    mean_grad_b_left = 2*(left_phase_data[:,-1,0].mean() - cntr) * grad_left.x_mean_grad(grad_left.drift_grad_b_array())
+    mean_grad_b_right = 2*(right_phase_data[:,-1,0].mean() + cntr) * grad_right.x_mean_grad(grad_right.drift_grad_b_array())
 
     var_grad_a_left = 2*(left_phase_data[:,-1,0].var() - 0.025) * grad_left.x_var_grad(grad_left.drift_grad_a_array())
     var_grad_a_right = 2*(right_phase_data[:,-1,0].var() - 0.025) * grad_right.x_var_grad(grad_right.drift_grad_a_array())
@@ -95,7 +96,7 @@ for step in range(training_params['training_iterations']):
     optimizer_b.step()
 
 
-    x_loss = torch.abs((left_phase_data[:, -1,0].mean() - 1))/1 + torch.abs((right_phase_data[:, -1,0].mean() + 1))/1
+    x_loss = torch.abs((left_phase_data[:, -1,0].mean() - cntr))/1 + torch.abs((right_phase_data[:, -1,0].mean() + cntr))/1
     var_loss = torch.abs((left_phase_data[:, -1,0].var() - 0.025))/0.025 + torch.abs((right_phase_data[:, -1,0].var() - 0.025))/0.025
     work = (grad_left.work_array().sum(axis=1).mean() + grad_right.work_array().sum(axis=1).mean())/2
     mean_distance_list.append(x_loss.item())

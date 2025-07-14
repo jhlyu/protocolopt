@@ -3,7 +3,7 @@ import gc
 import os
 import json
 import numpy as np
-import opt
+import opt_kyle as opt
 import yaml
 import math
 
@@ -15,15 +15,19 @@ with open("config.yaml", "r") as f:
 simulation_params = config["simulation_params"]
 protocol_params = config["protocol_params"]
 training_params = config["training_params"]
+save_dir = config['save_directory'] 
+
 
 simulation_params['noise_sigma'] = math.sqrt(2 * simulation_params['gamma'] / simulation_params['beta'])  # od Einstein relation
 centers = math.sqrt(protocol_params['b_endpoints'][0]/(2*protocol_params['a_endpoints'][0]))
 local_var = 1/(4 * protocol_params['b_endpoints'][0] * simulation_params['beta'])
 
+if not os.path.exists(save_dir):
+    os.makedirs(save_dir)
 
 torch_device = torch.device('cuda' if torch.cuda.is_available() else 'mps')
-if os.path.exists('training_metrics.json'):
-    with open( 'training_metrics.json', 'r') as f:
+if os.path.exists(save_dir + 'training_metrics.json'):
+    with open(save_dir + 'training_metrics.json', 'r') as f:
         metrics = json.load(f)
     mean_distance_list = metrics['mean_distance_list']
     var_distance_list = metrics['var_distance_list']
@@ -41,8 +45,8 @@ else:
     b_list_history = []
     print("Initialized new training metrics.")
 # Load or initialize alist and blist
-if os.path.exists('work_checkpoint.pt'):
-    checkpoint = torch.load('work_checkpoint.pt', weights_only=True)
+if os.path.exists(save_dir + 'work_checkpoint.pt'):
+    checkpoint = torch.load(save_dir + 'work_checkpoint.pt', weights_only=True)
     
     protocol_params['a_list'] = checkpoint['a_list'].to(torch_device).requires_grad_()
     protocol_params['b_list']= checkpoint['b_list'].to(torch_device).requires_grad_()
@@ -67,6 +71,7 @@ for step in range(training_params['training_iterations']):
 
     phase_data_generator = opt.quartic_simulation(num_paths=training_params['batch_size'], params=simulation_params, a_list=protocol_params['a_list'], b_list=protocol_params['b_list'], a_endpoints=protocol_params['a_endpoints'], b_endpoints=protocol_params['b_endpoints'])
     phase_data, noise=phase_data_generator.trajectory_generator()
+
     left_phase_data, left_noise = phase_data[phase_data[:, 0, 0] < 0], noise[phase_data[:, 0, 0] < 0]
     right_phase_data, right_noise = phase_data[phase_data[:, 0, 0] > 0], noise[phase_data[:, 0, 0] > 0]
 
@@ -88,8 +93,6 @@ for step in range(training_params['training_iterations']):
     left_potential_b_advance_grad = tensor.potential_grad_b_value_advance_array()
     
 
-
-
     grad = opt.grad_calc(
         sim_params=simulation_params,
         protocol_params=protocol_params['a_list'],
@@ -100,6 +103,7 @@ for step in range(training_params['training_iterations']):
         potential_grad_advance_array=left_potential_a_advance_grad,
         drift_grad_array=left_drift_a_grad
     )
+
     left_work = grad.work_array().sum(axis=1).mean() 
     # Set current for gradient calculation
     left_x_last = left_phase_data[:,-1,0]
@@ -117,6 +121,7 @@ for step in range(training_params['training_iterations']):
     grad.drift_grad_array = left_drift_b_grad
 
     # compute gradients for b protocol
+
     work_grad_b_left = grad.work_grad()
     mean_grad_b_left = grad.current_grad(torch.abs(left_x_last-centers))
     var_grad_b_left = grad.current_grad(left_x_last_square) - 2 * left_x_last.mean() * grad.current_grad(left_x_last)
@@ -203,7 +208,7 @@ metrics = {
         'a_list_history': a_list_history,
         'b_list_history': b_list_history
     }
-with open('training_metrics.json', 'w') as f:
+with open(save_dir + 'training_metrics.json', 'w') as f:
     json.dump(metrics, f)
 
 
@@ -212,5 +217,5 @@ torch.save({
     'b_list': protocol_params['b_list'],
     'optimizer_b_dict': optimizer_b.state_dict(),
     'optimizer_a_dict': optimizer_a.state_dict(),
-}, 'work_checkpoint.pt')
+}, save_dir + 'work_checkpoint.pt')
 print("Checkpoint saved. Please restart kernel before next run.")
