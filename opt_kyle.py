@@ -299,7 +299,6 @@ class grad_calc:
         df = self.drift_grad_value()[:,:,:-1] # chopping the last step
         mw = df * self.noise_array / (sigma ** 2)
         return mw
-
     #######needed to change
     def work_grad(self):
         dwp =self.work_grad_value().sum(axis=2).mean(axis=1)
@@ -310,6 +309,89 @@ class grad_calc:
     
     def current_grad(self, current):
         malliavian_weight = self.malliavian_weight_array().sum(axis=2)
+        x_mean_grad = (current * malliavian_weight).mean(axis=-1)
+        return x_mean_grad
+    
+
+class grad_calc_WIP:
+    def __init__(self, sim_params, protocol_params):
+        self.sim_params = sim_params
+        self.protocol_params = protocol_params
+        self.torch_device = torch.device('cuda' if torch.cuda.is_available() else 'mps')
+    
+
+    def work_array(self, potential, potential_advance):   
+        return potential_advance - potential[:,:-1]
+    
+    def protocol_grad(self):
+        """
+        Compute gradient of protocol (length num_steps + 1) w.r.t. each coefficient.
+
+        Anchor indices:
+        - index 0        → endpoints[0]
+        - index num_steps → endpoints[1]
+        - coefficients placed evenly between 1 and num_steps - 1 (inclusive)
+
+        Returns:
+            torch.Tensor: shape (m, num_steps + 1)
+        """
+        m = len(self.protocol_params)
+        num_steps = self.sim_params['num_steps']
+        # Anchor indices: [0, 1, ..., num_steps - 1, num_steps]
+        internal_anchors = torch.linspace(1, num_steps - 1, m, device=self.torch_device).long()
+        full_anchors = torch.cat([
+            torch.tensor([0], device=self.torch_device),
+            internal_anchors,
+            torch.tensor([num_steps], device=self.torch_device)
+        ])
+
+        grad_array = torch.zeros((m, num_steps + 1), device=self.torch_device)
+
+        for i in range(m):
+            left = full_anchors[i].item()
+            center = full_anchors[i + 1].item()
+            right = full_anchors[i + 2].item()
+
+            # left → center (inclusive)
+            if center > left:
+                x = torch.linspace(0, 1, center - left + 1, device=self.torch_device)
+                grad_array[i, left:center + 1] = x
+
+            # center → right (inclusive)
+            if right > center:
+                x = torch.linspace(1, 0, right - center + 1, device=self.torch_device)
+                grad_array[i, center:right + 1] = x
+
+        return grad_array
+
+    def potential_grad(self, potential_array, advance=False):
+        da_cn = 1*self.protocol_grad()
+        if advance:
+            da_cn = da_cn[:,1:]
+        return torch.einsum('ik,jk->jik', potential_array, da_cn)
+    
+    def work_grad_value(self, potential, potential_advance):
+        potential_grad_value = self.potential_grad(potential)[:,:,:-1]
+        potential_grad_advance_value = self.potential_grad(potetial_advance, advance=True)
+        work_grad = (potential_grad_advance_value - potential_grad_value)
+        return work_grad
+    
+    def malliavian_weight_array(self, drift_grad_value, noise_array):
+        sigma = self.sim_params['noise_sigma']
+        df = drift_grad_value[:,:,:-1] # chopping the last step
+        mw = df * noise_array / (sigma ** 2)
+        return mw
+
+    #######needed to change
+    def work_grad(self, potential, potential_advance, drift_grad_value, noise_array):
+        dwp =self.work_grad_value(potential, potential_advance).sum(axis=2).mean(axis=1)
+        w = self.work_array(potential, potential_advance).sum(axis=1)
+        mw = self.malliavian_weight_array(draft_grad_value, noise_array).sum(axis=2)
+        dpw = (w * mw).mean(axis=1)
+        return dwp + dpw
+    
+    def current_grad(self, current, drift_grad_value, noise_array):
+        malliavian_weight = self.malliavian_weight_array(drift_grad_value, noise_array).sum(axis=2)
         x_mean_grad = (current * malliavian_weight).mean(axis=-1)
         return x_mean_grad
     
@@ -351,7 +433,7 @@ class DerivativeArrays:
         """
         Returns the gradient functions for the potential with respect to each parameter.
         These should be overridden in subclasses.
-        There will be several of these and should be named dV_a, dV_b, etc.
+        There will be several of these and should be named dV_a, dV_b, etc...
         """
         pass
 
@@ -359,7 +441,7 @@ class DerivativeArrays:
         """
         Returns the gradient functions for the potential with respect to each parameter.
         These should be overridden in subclasses.
-        There will be several of these and should be named dF_a, dF_b
+        There will be several of these and should be named dF_a, dF_b, etc...
         """
         pass
 
@@ -370,29 +452,30 @@ class DerivativeArrays:
         can be changed later, since there is no reason to name the functions "a", "b", etc...
         will work up to 26 parameters currently
         '''
-        parameter_labels = list(string.ascii_lowercase)
-        drift_grad_list = []
-        potential_grad_list = []
-        potential_grad_advance_list = []
+        parameter_labels = list(string.ascii_lowercase) #just  a list of letters a-z
         
         for i in range(self.num_parameters):
             label = parameter_labels[i]
             dF, dV = getattr(self, f'dF_{label}'), getattr(self, f'dV_{label}')
 
-            try:
-                setattr(self, f'drift_grad_{label}_array', partial(self.get_array, dF) )
-            except:
-                setattr(self, f'drift_grad_{label}_array', None)
+            dF_label = f'drift_grad_{label}_array'
+            dV_label = f'potential_grad_{label}_value_array'
+            dV_advance_label = f'potential_grad_{label}_value_advance_array'
 
             try:
-                setattr(self, f'potential_grad_{label}_value_array', partial(self.get_array, dV) )
+                setattr(self, dF_label, partial(self.get_array, dF) )
             except:
-                setattr(self, f'potential_grad_{label}_value_array', None)
+                setattr(self,  dF_label, None)
 
             try:
-                setattr(self, f'potential_grad_{label}_value_advance_array', partial(self.get_array, dV, advance=True) )
+                setattr(self, dV_label, partial(self.get_array, dV) )
             except:
-                setattr(self, f'potential_grad_{label}_value_advance_array', None )
+                setattr(self, dV_label, None)
+
+            try:
+                setattr(self, dV_advance_label, partial(self.get_array, dV, advance=True) )
+            except:
+                setattr(self, dV_advance_label, None )
 
     
 class bit_flip(DerivativeArrays):
