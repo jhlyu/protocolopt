@@ -299,7 +299,7 @@ class grad_calc:
         df = self.drift_grad_value()[:,:,:-1] # chopping the last step
         mw = df * self.noise_array / (sigma ** 2)
         return mw
-    #######needed to change
+    #######needed to remove .mean(axis=1)
     def work_grad(self):
         dwp =self.work_grad_value().sum(axis=2).mean(axis=1)
         w = self.work_array().sum(axis=1)
@@ -311,7 +311,17 @@ class grad_calc:
         malliavian_weight = self.malliavian_weight_array().sum(axis=2)
         x_mean_grad = (current * malliavian_weight).mean(axis=-1)
         return x_mean_grad
-    
+
+    def current_grad_without_mean(self, current):
+        """
+        Returns:
+            currents gradient without averaging over paths.
+            tensor with dimensions (num_coefficients, num_paths).
+        """
+        malliavian_weight = self.malliavian_weight_array().sum(axis=2)
+        current_grad = (current * malliavian_weight)
+        return current_grad
+
 
 class grad_calc_WIP:
     def __init__(self, sim_params, protocol_params):
@@ -372,7 +382,7 @@ class grad_calc_WIP:
     
     def work_grad_value(self, potential, potential_advance):
         potential_grad_value = self.potential_grad(potential)[:,:,:-1]
-        potential_grad_advance_value = self.potential_grad(potetial_advance, advance=True)
+        potential_grad_advance_value = self.potential_grad(potential_advance, advance=True)
         work_grad = (potential_grad_advance_value - potential_grad_value)
         return work_grad
     
@@ -386,15 +396,15 @@ class grad_calc_WIP:
     def work_grad(self, potential, potential_advance, drift_grad_value, noise_array):
         dwp =self.work_grad_value(potential, potential_advance).sum(axis=2).mean(axis=1)
         w = self.work_array(potential, potential_advance).sum(axis=1)
-        mw = self.malliavian_weight_array(draft_grad_value, noise_array).sum(axis=2)
+        mw = self.malliavian_weight_array(drift_grad_value, noise_array).sum(axis=2)
         dpw = (w * mw).mean(axis=1)
         return dwp + dpw
     
     def current_grad(self, current, drift_grad_value, noise_array):
         malliavian_weight = self.malliavian_weight_array(drift_grad_value, noise_array).sum(axis=2)
-        x_mean_grad = (current * malliavian_weight).mean(axis=-1)
-        return x_mean_grad
-    
+        current_grad = (current * malliavian_weight).mean(axis=-1)
+        return current_grad
+
 class DerivativeArrays:
     def __init__(self, params, phase_data, p_lists, p_endpoints):
         self.params = params
@@ -507,7 +517,25 @@ class bit_flip(DerivativeArrays):
     
     def dV_b(self, coordinates, protocol_values):
         return -1 * coordinates[...,0]**2
-
+    
+    def distance_sq_current(self, coordinates, protocol_values):
+        # Calculate the distance squared, the coordinates must be categorized into left and right paths in advance!
+        centers = math.sqrt(self.b_endpoints[1]/(2*self.a_endpoints[1]))
+        num_left = torch.sum(coordinates[:, 0, 0] < 0)
+        num_right = torch.sum(coordinates[:, 0, 0] > 0)
+        distance_sq = torch.zeros(coordinates.shape[0], device=coordinates.device)
+        distance_sq[:num_left] = (coordinates[:num_left, -1, 0] - centers)**2
+        distance_sq[num_left:] = (coordinates[num_left:, -1, 0] + centers)**2
+        return distance_sq
+    
+    def var_current(self, coordinates, protocol_values):
+        # Calculate the variance of the current, the coordinates must be categorized into left and right paths in advance!
+        num_left = torch.sum(coordinates[:, 0, 0] < 0)
+        num_right = torch.sum(coordinates[:, 0, 0] > 0)
+        var = torch.zeros(coordinates.shape[0], device=coordinates.device)
+        var[:num_left] = (coordinates[:num_left, -1, 0] - coordinates[:num_left, -1, 0].mean())**2
+        var[num_left:] = (coordinates[num_left:, -1, 0] - coordinates[num_left:, -1, 0].mean())**2
+        return var
 
 class bit_erasure(DerivativeArrays):
     """

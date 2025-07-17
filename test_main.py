@@ -69,124 +69,119 @@ for step in range(training_params['training_iterations']):
     optimizer_b.zero_grad() 
     ######
 
-    phase_data_generator = opt.quartic_simulation(num_paths=training_params['batch_size'], params=simulation_params, a_list=protocol_params['a_list'], b_list=protocol_params['b_list'], a_endpoints=protocol_params['a_endpoints'], b_endpoints=protocol_params['b_endpoints'])
+    phase_data_generator = opt.quartic_simulation(
+        num_paths=training_params['batch_size'], 
+        params=simulation_params, 
+        a_list=protocol_params['a_list'], 
+        b_list=protocol_params['b_list'], 
+        a_endpoints=protocol_params['a_endpoints'], 
+        b_endpoints=protocol_params['b_endpoints'])
+    
     phase_data, noise=phase_data_generator.trajectory_generator()
+    
+    # Check the number of right and left paths
+    num_left = torch.sum(phase_data[:, 0, 0] < 0)
+    num_right = torch.sum(phase_data[:, 0, 0] > 0)
+    # Reorder the paths so that left paths are first
+    mask_left = (phase_data[:, 0, 0] < 0)
+    mask_right = ~mask_left  # everything else
 
-    left_phase_data, left_noise = phase_data[phase_data[:, 0, 0] < 0], noise[phase_data[:, 0, 0] < 0]
-    right_phase_data, right_noise = phase_data[phase_data[:, 0, 0] > 0], noise[phase_data[:, 0, 0] > 0]
+    phase_data_left = phase_data[mask_left]
+    phase_data_right = phase_data[mask_right]
+    noise_left = noise[mask_left]
+    noise_right = noise[mask_right]
+
+    phase_data_reordered = torch.cat([phase_data_left, phase_data_right], dim=0)
+    noise_reordered = torch.cat([noise_left, noise_right], dim=0)
+
+    distance_loss = ((phase_data_reordered[:num_left, -1, 0] - centers)**2).mean() +((phase_data_reordered[num_left:, -1, 0] + centers)**2).mean()
+    var_loss = ((phase_data_reordered[:num_left, -1, 0] - centers)**2).var() + ((phase_data_reordered[num_left:, -1, 0] + centers)**2).var()
+     
 
     tensor = opt.bit_flip(
         params=simulation_params, 
-        phase_data=left_phase_data,
+        phase_data=phase_data_reordered,
         a_list=protocol_params['a_list'], 
         b_list=protocol_params['b_list'], 
         a_endpoints=protocol_params['a_endpoints'], 
         b_endpoints=protocol_params['b_endpoints'])
 
-    left_potential_advance = tensor.potential_value_advance_array()
-    left_potential = tensor.potential_value_array()
-    left_drift_a_grad = tensor.drift_grad_a_array()
-    left_drift_b_grad = tensor.drift_grad_b_array()
-    left_potential_a_grad = tensor.potential_grad_a_value_array()
-    left_potential_b_grad = tensor.potential_grad_b_value_array()
-    left_potential_a_advance_grad = tensor.potential_grad_a_value_advance_array()
-    left_potential_b_advance_grad = tensor.potential_grad_b_value_advance_array()
-    
+    potential_advance = tensor.potential_value_advance_array()
+    potential = tensor.potential_value_array()
+    drift_a_grad = tensor.drift_grad_a_array()
+    drift_b_grad = tensor.drift_grad_b_array()
+    potential_a_grad = tensor.potential_grad_a_value_array()
+    potential_b_grad = tensor.potential_grad_b_value_array()
+    potential_a_advance_grad = tensor.potential_grad_a_value_advance_array()
+    potential_b_advance_grad = tensor.potential_grad_b_value_advance_array()
+
 
     grad = opt.grad_calc(
         sim_params=simulation_params,
         protocol_params=protocol_params['a_list'],
-        noise_array=left_noise,
-        potential_array=left_potential,
-        potential_advance_array=left_potential_advance,
-        potential_grad_array=left_potential_a_grad,
-        potential_grad_advance_array=left_potential_a_advance_grad,
-        drift_grad_array=left_drift_a_grad
+        noise_array=noise_reordered,
+        potential_array=potential,
+        potential_advance_array=potential_advance,
+        potential_grad_array=potential_a_grad,
+        potential_grad_advance_array=potential_a_advance_grad,
+        drift_grad_array=drift_a_grad
     )
+    work = grad.work_array().sum(axis=-1)
+    work_mean = work.mean()
+    left_work = work[:num_left].mean()
+    right_work = work[num_left:].mean()
+    # The loss function gradients is dL = dW + d(x+centers)^2|_left + d(x-centers)^2|_right + d var|_left + d var|_right
+    work_grad = grad.work_grad()
 
-    left_work = grad.work_array().sum(axis=1).mean() 
-    # Set current for gradient calculation
-    left_x_last = left_phase_data[:,-1,0]
-    left_x_last_square = left_x_last**2
-    left_x_var_last = (left_phase_data[:,-1,0] - left_x_last.mean())**2
+    last_position_distance = torch.zeros(phase_data_reordered.shape[0], device=torch_device)
+    last_position_distance[:num_left] = (phase_data_reordered[:num_left, -1, 0] - centers)**2
+    last_position_distance[num_left:] = (phase_data_reordered[num_left:, -1, 0] + centers)**2
+    last_position = phase_data_reordered[:, -1, 0]
+    last_position_sq = last_position**2
+
+
+    x_grad_array = grad.current_grad_without_mean(last_position_distance)
+    sq_grad_array = grad.current_grad_without_mean(last_position_sq)
+    # compute the distance grad = <d(X_{L}-center)**2> + <d(X_{R}+center)**2> or d<(x-target)^2>
+    #x_grad = (x_grad_array[:,:num_left]).mean(axis=-1) + (x_grad_array[:,num_left:]).mean(axis=-1)
+    x_grad = x_grad_array.mean(axis=-1)
+    # compute the variance grad = d <X_{L}**2> - 2 d <X_{L}>* <X_{L}>
+    var_grad = (sq_grad_array[:,:num_left]).mean(axis=-1) + (sq_grad_array[:,num_left:]).mean(axis=-1) - 2 * (last_position[:num_left].mean(axis=-1) * x_grad_array[:,:num_left].mean(axis=-1)) - 2 * (x_grad_array[:,num_left:].mean(axis=-1) * last_position[num_left:].mean(axis=-1))
+
+    a_grad = training_params['alpha'] * x_grad + training_params['alpha_1'] * var_grad + training_params['alpha_2'] * work_grad
+    protocol_params['a_list'].grad = a_grad
     
-    # compute gradients for a protocol
-    work_grad_a_left = grad.work_grad()
-    mean_grad_a_left = grad.current_grad(torch.abs(left_x_last-centers))
-    var_grad_a_left = grad.current_grad(left_x_last_square) - 2 * left_x_last.mean() * grad.current_grad(left_x_last)
-    # switch to b protocol
-    grad.protocol_params = protocol_params['b_list']
-    grad.potential_grad_array = left_potential_b_grad
-    grad.potential_grad_advance_array = left_potential_b_advance_grad
-    grad.drift_grad_array = left_drift_b_grad
-
-    # compute gradients for b protocol
-
-    work_grad_b_left = grad.work_grad()
-    mean_grad_b_left = grad.current_grad(torch.abs(left_x_last-centers))
-    var_grad_b_left = grad.current_grad(left_x_last_square) - 2 * left_x_last.mean() * grad.current_grad(left_x_last)
-    
-
-    # will do the same for right side
-    tensor.phase_data = right_phase_data
-    
-    
-    right_potential_advance = tensor.potential_value_advance_array()
-    right_potential = tensor.potential_value_array()
-    right_drift_a_grad = tensor.drift_grad_a_array()
-    right_drift_b_grad = tensor.drift_grad_b_array()
-    right_potential_a_grad = tensor.potential_grad_a_value_array()
-    right_potential_b_grad = tensor.potential_grad_b_value_array()
-    right_potential_a_advance_grad = tensor.potential_grad_a_value_advance_array()
-    right_potential_b_advance_grad = tensor.potential_grad_b_value_advance_array()
-
     grad = opt.grad_calc(
         sim_params=simulation_params,
-        noise_array=right_noise,
-        protocol_params=protocol_params['a_list'],
-        potential_array=right_potential,
-        potential_advance_array=right_potential_advance,
-        potential_grad_array=right_potential_a_grad,
-        potential_grad_advance_array=right_potential_a_advance_grad,
-        drift_grad_array=right_drift_a_grad
+        protocol_params=protocol_params['b_list'],
+        noise_array=noise_reordered,
+        potential_array=potential,
+        potential_advance_array=potential_advance,
+        potential_grad_array=potential_b_grad,
+        potential_grad_advance_array=potential_b_advance_grad,
+        drift_grad_array=drift_b_grad
     )
-    right_work = grad.work_array().sum(axis=1).mean()
 
-    # Set current for gradient calculation
-    right_x_last = right_phase_data[:,-1,0]
-    right_x_var_last = (right_phase_data[:,-1,0] - right_x_last.mean())**2
-    right_x_last_square = right_x_last**2
-   
-    # compute gradients for a protocol
-    work_grad_a_right = grad.work_grad()
-    mean_grad_a_right = grad.current_grad(torch.abs(right_x_last+centers))
-    var_grad_a_right = grad.current_grad(right_x_last_square) - 2 * right_x_last.mean() * grad.current_grad(right_x_last)
+    x_grad_array = grad.current_grad_without_mean(last_position_distance)
+    sq_grad_array = grad.current_grad_without_mean(last_position_sq)
+    # compute the distance grad = <d(X_{L}-center)**2> + <d(X_{R}+center)**2> 
+    x_grad = (x_grad_array[:,:num_left]).mean(axis=-1) + (x_grad_array[:,num_left:]).mean(axis=-1)
+    
+    # compute the variance grad = d <X_{L}**2> - 2 d <X_{L}>* <X_{L}>
+    var_grad = (sq_grad_array[:,:num_left]).mean(axis=-1) + (sq_grad_array[:,num_left:]).mean(axis=-1) - 2 * (last_position[:num_left].mean(axis=-1) * x_grad_array[:,:num_left].mean(axis=-1)) - 2 * (x_grad_array[:,num_left:].mean(axis=-1) * last_position[num_left:].mean(axis=-1))
 
-    # switch to b protocol
-    grad.protocol_params = protocol_params['b_list']
-    grad.potential_grad_array = right_potential_b_grad
-    grad.potential_grad_advance_array = right_potential_b_advance_grad
-    grad.drift_grad_array = right_drift_b_grad
+    b_grad = training_params['alpha'] * x_grad + training_params['alpha_1'] * var_grad + training_params['alpha_2'] * work_grad
+    protocol_params['b_list'].grad = b_grad
 
-    # compute gradients for b protocol
-    work_grad_b_right = grad.work_grad()
-    mean_grad_b_right = grad.current_grad(torch.abs(right_x_last+centers))
-    var_grad_b_right = grad.current_grad(right_x_last_square) - 2 * right_x_last.mean() * grad.current_grad(right_x_last)
-
-    a_grad = training_params['alpha'] * (mean_grad_a_left + mean_grad_a_right) + training_params['alpha_1'] * (var_grad_a_left + var_grad_a_right) + training_params['alpha_2'] * (work_grad_a_left + work_grad_a_right) 
-    b_grad = training_params['alpha'] * (mean_grad_b_left + mean_grad_b_right) + training_params['alpha_1'] * (var_grad_b_left + var_grad_b_right) + training_params['alpha_2'] * (work_grad_b_left + work_grad_b_right)
 
     protocol_params['a_list'].grad = a_grad
     protocol_params['b_list'].grad = b_grad
 
-   
-    x_loss = (left_x_last.mean() - centers)**2 + (right_x_last.mean() + centers)**2
-    var_loss = (left_x_var_last.mean() - local_var)**2 + (right_x_var_last.mean() - local_var)**2
-    work = left_work + right_work
-    total_loss = training_params['alpha'] * x_loss + training_params['alpha_1'] * var_loss + training_params['alpha_2'] * work
-    mean_distance_list.append(x_loss.item())
+    
+    total_loss = training_params['alpha'] * distance_loss + training_params['alpha_1'] * var_loss + training_params['alpha_2'] * work_mean
+    mean_distance_list.append(distance_loss.item())
     var_distance_list.append(var_loss.item())
-    work_list.append(work.item())
+    work_list.append(work_mean.item())
     total_loss_list.append(total_loss.item())
     a_list_history.append(protocol_params['a_list'].detach().cpu().clone().tolist())
     b_list_history.append(protocol_params['b_list'].detach().cpu().clone().tolist())
@@ -195,7 +190,7 @@ for step in range(training_params['training_iterations']):
     optimizer_b.step()
 
     if step % 10 == 0:
-        print(f"Step {step}: a = {protocol_params['a_list']}, b = {protocol_params['b_list']}, x = {x_loss}, work = {work}, var = {var_loss}, total loss = {total_loss}")
+        print(f"Step {step}: a = {protocol_params['a_list']}, b = {protocol_params['b_list']}, x = {distance_loss}, work = {work_mean}, var = {var_loss}, total loss = {total_loss}")
 
 
  # Save the lists after training using JSON
