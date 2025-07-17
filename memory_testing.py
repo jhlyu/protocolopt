@@ -22,7 +22,6 @@ def script1(N = iterations, L = data_size):
 def script2(N = iterations, L = data_size):
     means = []
     for i in range(N):
-        sleep(1)
         x1 = torch.normal(0,1,size=(1,int(L) ), requires_grad=True, device='mps')
         b = x1**2
         b.sum().backward()
@@ -32,7 +31,7 @@ def script2(N = iterations, L = data_size):
 
 def run_memory_test(test_script, n):
     for i in range(n):
-        sleep(5/n)
+        
         if test_script == '1':
             _ = script1()
         elif test_script == '2':
@@ -40,6 +39,8 @@ def run_memory_test(test_script, n):
         else:
             raise ValueError("Invalid test script. Choose '1' or '2'.")
             return
+        
+        sleep(10/n)
 
     return
 
