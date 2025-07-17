@@ -498,8 +498,8 @@ class bit_flip(DerivativeArrays):
     def __init__(self, params, phase_data, a_list, b_list, a_endpoints, b_endpoints):
         super().__init__(params, phase_data, [a_list, b_list], [a_endpoints, b_endpoints])
 
+        self.centers = math.sqrt(self.parameter_endpoint_lists[0][1]/(2*self.parameter_endpoint_lists[1][1]))
         self.set_derivative_methods()
-           
 
     def potential_function(self, coordinates, protocol_values):
         protocol_a, protocol_b = protocol_values
@@ -518,14 +518,13 @@ class bit_flip(DerivativeArrays):
     def dV_b(self, coordinates, protocol_values):
         return -1 * coordinates[...,0]**2
     
-    def distance_sq_current(self, coordinates, protocol_values):
+    def distance_sq_current(self, coordinates, protocol_values, order=2):
         # Calculate the distance squared, the coordinates must be categorized into left and right paths in advance!
-        centers = math.sqrt(self.b_endpoints[1]/(2*self.a_endpoints[1]))
         num_left = torch.sum(coordinates[:, 0, 0] < 0)
         num_right = torch.sum(coordinates[:, 0, 0] > 0)
         distance_sq = torch.zeros(coordinates.shape[0], device=coordinates.device)
-        distance_sq[:num_left] = (coordinates[:num_left, -1, 0] - centers)**2
-        distance_sq[num_left:] = (coordinates[num_left:, -1, 0] + centers)**2
+        distance_sq[:num_left] = (coordinates[:num_left, -1, 0] - self.centers)**order
+        distance_sq[num_left:] = (coordinates[num_left:, -1, 0] + self.centers)**order
         return distance_sq
     
     def var_current(self, coordinates, protocol_values):
