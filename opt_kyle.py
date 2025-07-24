@@ -345,7 +345,7 @@ class grad_calc_WIP:
         Returns:
             torch.Tensor: shape (m, num_steps + 1)
         """
-        m = len(self.protocol_params)
+        m = self.protocol_params['num_coefficients']
         num_steps = self.sim_params['num_steps']
         # Anchor indices: [0, 1, ..., num_steps - 1, num_steps]
         internal_anchors = torch.linspace(1, num_steps - 1, m, device=self.torch_device).long()
@@ -374,29 +374,34 @@ class grad_calc_WIP:
 
         return grad_array
 
-    def potential_grad(self, potential_array, advance=False):
+    def potential_protocol_grad_array(self, potential_array, advance=False):
         da_cn = 1*self.protocol_grad()
         if advance:
             da_cn = da_cn[:,1:]
         return torch.einsum('ik,jk->jik', potential_array, da_cn)
     
-    def work_grad_value(self, potential, potential_advance):
-        potential_grad_value = self.potential_grad(potential)[:,:,:-1]
-        potential_grad_advance_value = self.potential_grad(potential_advance, advance=True)
-        work_grad = (potential_grad_advance_value - potential_grad_value)
-        return work_grad
+    def drift_protocol_grad_array(self, drift_grad_array):
+        da_cn = self.protocol_grad()
+        dphi_cn = torch.einsum('ik,jk->jik', drift_grad_array, da_cn)
+        return dphi_cn
     
-    def malliavian_weight_array(self, drift_grad_value, noise_array):
+    def potential_diff_protocol_grad_array(self, potential, potential_advance):
+        potential_grad_value = self.potential_protocol_grad_array(potential)[:,:,:-1]
+        potential_grad_advance_value = self.potential_protocol_grad_array(potential_advance, advance=True)
+        potential_diff_protocol_grad_array = (potential_grad_advance_value - potential_grad_value)
+        return potential_diff_protocol_grad_array
+
+    def malliavian_weight_array(self, drift_protocol_grad_array, noise_array):
         sigma = self.sim_params['noise_sigma']
-        df = drift_grad_value[:,:,:-1] # chopping the last step
+        df = drift_protocol_grad_array[:,:,:-1] # chopping the last step
         mw = df * noise_array / (sigma ** 2)
         return mw
 
-    #######needed to change
-    def work_grad(self, potential, potential_advance, drift_grad_value, noise_array):
-        dwp =self.work_grad_value(potential, potential_advance).sum(axis=2).mean(axis=1)
+
+    def work_protocol_grad(self, potential, potential_advance, drift_protocol_grad_array, noise_array):
+        dwp =self.potential_diff_protocol_grad_array(potential, potential_advance).sum(axis=2).mean(axis=1)
         w = self.work_array(potential, potential_advance).sum(axis=1)
-        mw = self.malliavian_weight_array(drift_grad_value, noise_array).sum(axis=2)
+        mw = self.malliavian_weight_array(drift_protocol_grad_array, noise_array).sum(axis=2)
         dpw = (w * mw).mean(axis=1)
         return dwp + dpw
     
@@ -498,7 +503,7 @@ class bit_flip(DerivativeArrays):
     def __init__(self, params, phase_data, a_list, b_list, a_endpoints, b_endpoints):
         super().__init__(params, phase_data, [a_list, b_list], [a_endpoints, b_endpoints])
 
-        self.centers = math.sqrt(self.parameter_endpoint_lists[0][1]/(2*self.parameter_endpoint_lists[1][1]))
+        self.centers = math.sqrt(self.parameter_endpoint_lists[1][1]/(2*self.parameter_endpoint_lists[0][1]))
         self.set_derivative_methods()
 
     def potential_function(self, coordinates, protocol_values):
@@ -520,11 +525,8 @@ class bit_flip(DerivativeArrays):
     
     def distance_sq_current(self, coordinates, protocol_values, order=2):
         # Calculate the distance squared, the coordinates must be categorized into left and right paths in advance!
-        num_left = torch.sum(coordinates[:, 0, 0] < 0)
-        num_right = torch.sum(coordinates[:, 0, 0] > 0)
-        distance_sq = torch.zeros(coordinates.shape[0], device=coordinates.device)
-        distance_sq[:num_left] = (coordinates[:num_left, -1, 0] - self.centers)**order
-        distance_sq[num_left:] = (coordinates[num_left:, -1, 0] + self.centers)**order
+        target = (coordinates[:, 0, 0] < 0) * self.centers - (coordinates[:, 0, 0] > 0) * self.centers
+        distance_sq = (coordinates[:,-1,0] - target)**order
         return distance_sq
     
     def var_current(self, coordinates, protocol_values):
@@ -535,6 +537,13 @@ class bit_flip(DerivativeArrays):
         var[:num_left] = (coordinates[:num_left, -1, 0] - coordinates[:num_left, -1, 0].mean())**2
         var[num_left:] = (coordinates[num_left:, -1, 0] - coordinates[num_left:, -1, 0].mean())**2
         return var
+    
+    def var_abs_current(self, coordinates, protocol_values):
+        # Calculate the variance of the absolute value of the current, the coordinates must be categorized into left and right paths in advance!
+        coordinates_abs = torch.abs(coordinates[:,-1,0])
+        mean_abs = coordinates_abs.mean()
+        return (coordinates_abs - mean_abs)**2
+
 
 class bit_erasure(DerivativeArrays):
     """
