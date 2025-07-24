@@ -398,11 +398,11 @@ class grad_calc_WIP:
         return mw
 
 
-    def work_protocol_grad(self, potential, potential_advance, drift_protocol_grad_array, noise_array):
-        dwp =self.potential_diff_protocol_grad_array(potential, potential_advance).sum(axis=2).mean(axis=1)
-        w = self.work_array(potential, potential_advance).sum(axis=1)
+    def work_protocol_grad(self, dpotential_array, dpotential_advance_array, drift_protocol_grad_array, noise_array):
+        dwp =self.potential_diff_protocol_grad_array(dpotential_array, dpotential_advance_array).sum(axis=2).mean(axis=1)
+        w = self.work_array(dpotential_array, dpotential_advance_array).sum(axis=1)
         mw = self.malliavian_weight_array(drift_protocol_grad_array, noise_array).sum(axis=2)
-        dpw = (w * mw).mean(axis=1)
+        dpw = (w * mw).mean(axis=-1)
         return dwp + dpw
     
     def current_grad(self, current, drift_grad_value, noise_array):

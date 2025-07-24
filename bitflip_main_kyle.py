@@ -108,11 +108,11 @@ for step in range(training_params['training_iterations']):
     
 
 
-    work_grad_a = grad.work_protocol_grad(bitflip.potential_value_array(), bitflip.potential_value_advance_array(), grad.drift_protocol_grad_array(bitflip.drift_grad_a_array()), noise)
+    work_grad_a = grad.work_protocol_grad(bitflip.potential_grad_a_value_array(), bitflip.potential_grad_a_value_advance_array(), grad.drift_protocol_grad_array(bitflip.drift_grad_a_array()), noise)
     distance_grad_a = grad.current_grad(bitflip.distance_sq_current(phase_data, p_lists, order=2), grad.drift_protocol_grad_array(bitflip.drift_grad_a_array()), noise)
     var_grad_a = grad.current_grad(bitflip.var_abs_current(phase_data, p_lists), grad.drift_protocol_grad_array(bitflip.drift_grad_a_array()), noise)
-    
-    work_grad_b = grad.work_protocol_grad(bitflip.potential_value_array(), bitflip.potential_value_advance_array(), grad.drift_protocol_grad_array(bitflip.drift_grad_b_array()), noise)
+
+    work_grad_b = grad.work_protocol_grad(bitflip.potential_grad_b_value_array(), bitflip.potential_grad_b_value_advance_array(), grad.drift_protocol_grad_array(bitflip.drift_grad_b_array()), noise)
     distance_grad_b = grad.current_grad(bitflip.distance_sq_current(phase_data, p_lists, order=2), grad.drift_protocol_grad_array(bitflip.drift_grad_b_array()), noise)
     var_grad_b = grad.current_grad(bitflip.var_abs_current(phase_data, p_lists), grad.drift_protocol_grad_array(bitflip.drift_grad_b_array()), noise)
    
