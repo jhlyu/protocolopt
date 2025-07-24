@@ -41,8 +41,9 @@ if os.path.exists(save_dir + 'training_metrics.json'):
     with open( save_dir + 'training_metrics.json', 'r') as f:
         metrics = json.load(f)
     mean_distance_list = metrics['mean_distance_list']
-    var_distance_list = metrics['var_distance_list']
     work_list = metrics['work_list']
+    abs_var_list = metrics['abs_var_list']
+    total_loss_list = metrics['total_loss_list']
     print("Loaded previous training metrics.")
 else:
     print("No available training metrics to plot.")
@@ -80,20 +81,24 @@ def protocol_plot():
 
 def loss_plot():
     # loss and work plot
-    fig, ax = plt.subplots(1, 3, figsize=(18, 6))
+    fig, ax = plt.subplots(1, 4, figsize=(24, 6))
     ax[0].plot([float(x) for x in mean_distance_list], label='loss')
-    ax[1].plot([float(x) for x in var_distance_list], label='variance loss')
     ax[2].plot([float(x) for x in work_list], label='work')
-
-    #ax[0].set_title('mean loss')
+    ax[1].plot([float(x) for x in abs_var_list], label='abs_var')
+    ax[3].plot([float(x) for x in total_loss_list], label='total loss')
+    
+    ax[0].set_title('mean loss')
     ax[0].set_xlabel('Step')
     ax[0].set_ylabel('loss')
-    #ax[1].set_title('variance loss')
+    ax[1].set_title('variance loss')
     ax[1].set_xlabel('Step')
     ax[1].set_ylabel('variance loss')
-    #ax[2].set_title('work')
+    ax[2].set_title('work')
     ax[2].set_xlabel('Step')
-    ax[2].set_ylabel('work')
+    ax[1].set_ylabel('abs_var')
+    ax[3].set_title('total loss')
+    ax[3].set_xlabel('Step')
+    ax[3].set_ylabel('total loss')
     plt.savefig(plot_dir + f"mean_var_work_{training_params['alpha']}_{training_params['alpha_1']}_{training_params['alpha_2']}_{len(mean_distance_list)}.png", dpi=300)
     #plt.show()
 
