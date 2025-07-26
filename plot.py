@@ -10,17 +10,25 @@ import json
 import math
 import yaml
 import opt_kyle as bit_flip
+import argparse
 
 torch_device = torch.device('cuda' if torch.cuda.is_available() else 'mps')
 
-with open("config.yaml", "r") as f:
+
+parser = argparse.ArgumentParser(description='Run memory test on MPS tensors.')
+parser.add_argument('directory', type=str, default='./results/', help='Path to the configuration file.')
+args = parser.parse_args()
+print(f"Running plot script from {args.directory}")
+
+save_dir = args.directory
+
+with open(save_dir+'config.yaml', "r") as f:
     config = yaml.safe_load(f)
 
 simulation_params = config["simulation_params"]
 protocol_params = config["protocol_params"]
 training_params = config["training_params"]
 
-save_dir = config['save_directory'] 
 plot_dir = save_dir + 'plots/' 
 
 if not os.path.exists(save_dir):
@@ -42,7 +50,7 @@ if os.path.exists(save_dir + 'training_metrics.json'):
         metrics = json.load(f)
     mean_distance_list = metrics['mean_distance_list']
     work_list = metrics['work_list']
-    abs_var_list = metrics['abs_var_list']
+    var_list = metrics['var_list']
     total_loss_list = metrics['total_loss_list']
     print("Loaded previous training metrics.")
 else:
@@ -84,7 +92,7 @@ def loss_plot():
     fig, ax = plt.subplots(1, 4, figsize=(24, 6))
     ax[0].plot([float(x) for x in mean_distance_list], label='loss')
     ax[2].plot([float(x) for x in work_list], label='work')
-    ax[1].plot([float(x) for x in abs_var_list], label='abs_var')
+    ax[1].plot([float(x) for x in var_list], label='abs_var')
     ax[3].plot([float(x) for x in total_loss_list], label='total loss')
     
     ax[0].set_title('mean loss')

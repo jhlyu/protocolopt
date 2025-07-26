@@ -5,7 +5,7 @@ from functools import partial
 import string
 import math
 
-def piecewise_protocol_value(num_steps, coefficientlist, endpoints):
+def piecewise_protocol_value(num_steps, coefficientlist, endpoints, torch_device=torch.device('cuda' if torch.cuda.is_available() else 'mps')):
    
     """
     Generate piecewise linear protocol with endpoints at start and end,
@@ -19,7 +19,6 @@ def piecewise_protocol_value(num_steps, coefficientlist, endpoints):
         torch.Tensor: Protocol of length (num_steps + 1).
     """
     num_coeffs = len(coefficientlist)
-    torch_device = torch.device('cuda' if torch.cuda.is_available() else 'mps')
         # Define anchor positions:
         # [0] -> endpoints[0]
         # [1] -> coefficientlist[0]
@@ -70,14 +69,15 @@ class quartic_simulation:
     The default is that the initial potential is 5x^4- 10x^2 and the final potential is 5x^4- 10x^2 .
 
     """
-    def __init__(self, num_paths, params, a_list, b_list, a_endpoints, b_endpoints):
+    def __init__(self, num_paths, params, a_list, b_list, a_endpoints, b_endpoints, device=torch.device('cuda' if torch.cuda.is_available() else 'mps')):
+        
         self.params = params
         self.a_list = a_list
         self.b_list = b_list
         self.a_endpoints = a_endpoints
         self.b_endpoints = b_endpoints
         self.num_paths = num_paths
-        self.torch_device = torch.device('cuda' if torch.cuda.is_available() else 'mps')
+        self.torch_device = device
         self.burn_in = 4000
         self.local_std = 0.4     # standard deviation for local proposal
         self.jump_prob = 0.2     # probability of jumping to opposite mode
@@ -135,10 +135,10 @@ class quartic_simulation:
         num_steps = self.params['num_steps']
         dt = self.params['dt']
         gamma = self.params['gamma']
-        noise_sigma = torch.sqrt(2 * gamma / torch.tensor(self.params['beta']))  # noise standard deviation
+        noise_sigma = torch.sqrt( torch.tensor(2 * gamma) / self.params['beta'] )  # noise standard deviation
 
-        protocol_a_value = piecewise_protocol_value(num_steps, self.a_list, self.a_endpoints)
-        protocol_b_value = piecewise_protocol_value(num_steps, self.b_list, self.b_endpoints)
+        protocol_a_value = piecewise_protocol_value(num_steps, self.a_list, self.a_endpoints, torch_device=self.torch_device)
+        protocol_b_value = piecewise_protocol_value(num_steps, self.b_list, self.b_endpoints, torch_device=self.torch_device)
         noise_array = torch.randn(self.num_paths, num_steps, device=self.torch_device) * (noise_sigma * math.sqrt(self.params['dt']))
         phase_array = torch.zeros((self.num_paths, num_steps + 1, 2), device=self.torch_device) # 2 for position and velocity
         phase_array[:, 0, 0] = self.mh_sampler() # initial position
@@ -151,191 +151,24 @@ class quartic_simulation:
             phase_array[:,i + 1, 1] = phase_array[:, i, 1] - dt * gamma * phase_array[:, i, 1] - dt * (4 * protocol_a_value[i] * phase_array[:, i, 0]**3 - 2 * protocol_b_value[i] * phase_array[:,i,0] ) + noise_array[:,i]
         return phase_array, noise_array
 
+
+
 class grad_calc:
-    def __init__(self, sim_params, protocol_params, noise_array, potential_array, potential_advance_array, potential_grad_array, potential_grad_advance_array, drift_grad_array):
+    def __init__(self, sim_params, protocol_params, device = torch.device('cuda' if torch.cuda.is_available() else 'mps') ):
         self.sim_params = sim_params
         self.protocol_params = protocol_params
-        self.noise_array = noise_array
-        self.potential_array = potential_array
-        self.potential_advance_array = potential_advance_array
-        self.potential_grad_array = potential_grad_array
-        self.potential_grad_advance_array = potential_grad_advance_array
-        self.drift_grad_array = drift_grad_array
-        self.torch_device = torch.device('cuda' if torch.cuda.is_available() else 'mps')
-    
-
-    def work_array(self):
-        """
-        Calculate the work done along the trajectory.
-        The work is V(x0,t1)-V(x0,t0) + V(x1,t2)-V(x1,t1) + ... + V(xN-1,tN) - V(xN-1,tN-1).
-        Args:
-            trajectory (ndarray): Array of positions along the trajectory.
-            a (float): Linear coefficient of the protocol.
-            dt (float): Time step size.
-
-        Returns:
-            float: Total work done.
-        """
-    
-        potential = self.potential_array[:,:-1]
-        potential_advance = self.potential_advance_array
-        # Calculate the work done along the trajectory
-        work = (potential_advance - potential)
-        return work
-    
-    def protocol_grad(self):
-        """
-        Compute gradient of protocol (length num_steps + 1) w.r.t. each coefficient.
-
-        Anchor indices:
-        - index 0        → endpoints[0]
-        - index num_steps → endpoints[1]
-        - coefficients placed evenly between 1 and num_steps - 1 (inclusive)
-
-        Returns:
-            torch.Tensor: shape (m, num_steps + 1)
-        """
-        m = len(self.protocol_params)
-        num_steps = self.sim_params['num_steps']
-        # Anchor indices: [0, 1, ..., num_steps - 1, num_steps]
-        internal_anchors = torch.linspace(1, num_steps - 1, m, device=self.torch_device).long()
-        full_anchors = torch.cat([
-            torch.tensor([0], device=self.torch_device),
-            internal_anchors,
-            torch.tensor([num_steps], device=self.torch_device)
-        ])
-
-        grad_array = torch.zeros((m, num_steps + 1), device=self.torch_device)
-
-        for i in range(m):
-            left = full_anchors[i].item()
-            center = full_anchors[i + 1].item()
-            right = full_anchors[i + 2].item()
-
-            # left → center (inclusive)
-            if center > left:
-                x = torch.linspace(0, 1, center - left + 1, device=self.torch_device)
-                grad_array[i, left:center + 1] = x
-
-            # center → right (inclusive)
-            if right > center:
-                x = torch.linspace(1, 0, right - center + 1, device=self.torch_device)
-                grad_array[i, center:right + 1] = x
-
-        return grad_array
-    
-    def potential_grad_value(self):
-        """
-        Calculate the potential value grad with parameters in cn at position x and time t with output being same as position array.
-        dV/dcn = potential_grad_array  * grad_protocol
-        
-        Returns:
-            ndarray: Array of potential gradients at each time step.
-            Dimensions: (num_coefficients, num_paths, num_steps)
-        """
-        dv_da = self.potential_grad_array
-        da_cn = 1*self.protocol_grad()
-        return torch.einsum('ik,jk->jik', dv_da, da_cn)
-    
-    def potential_grad_value_advance(self):
-        """
-        Calculate the potential value grad with parameters in cn at position x and time t+dt with output being same as position array.
-        dV/dcn = x  * da_cn(t+dt)
-        
-        Args:
-            x (ndarray): Array of positions along the trajectory.
-            coefficientlist (list): List of coefficients for the Fourier Series.
-            dt (float): Time step size.
-
-        Returns:
-            ndarray: Array of potential gradients at each time step.
-            Dimensions: (num_coefficients, num_paths, num_steps)
-        """
-        dv_da = self.potential_grad_advance_array
-        da_cn = self.protocol_grad()[:,1:]
-        return torch.einsum('ik,jk->jik', dv_da, da_cn)
-    
-    def work_grad_value(self):
-        potential_grad_value = self.potential_grad_value()[:,:,:-1]
-        potential_grad_advance_value = self.potential_grad_value_advance()
-        work_grad = (potential_grad_advance_value - potential_grad_value)
-        return work_grad
-    
-    def drift_grad_value(self):
-        """
-    Calculate the drift gradient at position x and time t with output being same as position array.
-    
-    
-    Args:
-        x (ndarray): Array of positions along the trajectory.
-        coefficientlist (list): List of coefficients for the Fourier Series.
-        dt (float): Time step size.
-
-    Returns:
-        ndarray: Array of drift gradients at each time step.
-        Dimensions: (num_coefficients, num_paths, num_steps)
-        """
-    
-        dphi_a = self.drift_grad_array
-        da_cn = self.protocol_grad()
-        dphi_cn = torch.einsum('ik,jk->jik', dphi_a, da_cn)
-        return dphi_cn
-    
-    def malliavian_weight_array(self):
-        """
-        Calculate the malliavin weight.
-        The malliavin weight is given by:
-        mw = drift_grad * noise /sigma^2
-
-        Args:
-            x (ndarray): Array of positions along the trajectory.
-            noise (ndarray): Array of noise values along the trajectory.
-            sigma (float): Standard deviation of the noise.
-
-        Returns:
-            ndarray: Array of malliavin weights at each time step.
-    """
-        sigma = self.sim_params['noise_sigma']
-        df = self.drift_grad_value()[:,:,:-1] # chopping the last step
-        mw = df * self.noise_array / (sigma ** 2)
-        return mw
-    #######needed to remove .mean(axis=1)
-    def work_grad(self):
-        dwp =self.work_grad_value().sum(axis=2).mean(axis=1)
-        w = self.work_array().sum(axis=1)
-        mw = self.malliavian_weight_array().sum(axis=2)
-        dpw = (w * mw).mean(axis=1)
-        return dwp + dpw
-    
-    def current_grad(self, current):
-        malliavian_weight = self.malliavian_weight_array().sum(axis=2)
-        x_mean_grad = (current * malliavian_weight).mean(axis=-1)
-        return x_mean_grad
-
-    def current_grad_without_mean(self, current):
-        """
-        Returns:
-            currents gradient without averaging over paths.
-            tensor with dimensions (num_coefficients, num_paths).
-        """
-        malliavian_weight = self.malliavian_weight_array().sum(axis=2)
-        current_grad = (current * malliavian_weight)
-        return current_grad
-
-
-class grad_calc_WIP:
-    def __init__(self, sim_params, protocol_params):
-        self.sim_params = sim_params
-        self.protocol_params = protocol_params
-        self.torch_device = torch.device('cuda' if torch.cuda.is_available() else 'mps')
-    
+        #self.torch_device = torch.device('cpu') 
+        self.torch_device = device
 
     def work_array(self, potential, potential_advance):   
         return potential_advance - potential[:,:-1]
     
+
     def protocol_grad(self):
+
         """
-        Compute gradient of protocol (length num_steps + 1) w.r.t. each coefficient.
+        Returns gradient of protocol (length num_steps + 1) w.r.t. each coefficient.
+        Computes it if it hasnt been run yet
 
         Anchor indices:
         - index 0        → endpoints[0]
@@ -345,34 +178,44 @@ class grad_calc_WIP:
         Returns:
             torch.Tensor: shape (m, num_steps + 1)
         """
-        m = self.protocol_params['num_coefficients']
-        num_steps = self.sim_params['num_steps']
-        # Anchor indices: [0, 1, ..., num_steps - 1, num_steps]
-        internal_anchors = torch.linspace(1, num_steps - 1, m, device=self.torch_device).long()
-        full_anchors = torch.cat([
-            torch.tensor([0], device=self.torch_device),
-            internal_anchors,
-            torch.tensor([num_steps], device=self.torch_device)
-        ])
 
-        grad_array = torch.zeros((m, num_steps + 1), device=self.torch_device)
+        try:
+            return self.protocol_grad_array
+        except AttributeError:
+            m = self.protocol_params['num_coefficients']
+            num_steps = self.sim_params['num_steps']
+            self.protocol_grad_array = torch.empty((m, num_steps + 1), device=self.torch_device)
+        
 
-        for i in range(m):
-            left = full_anchors[i].item()
-            center = full_anchors[i + 1].item()
-            right = full_anchors[i + 2].item()
 
-            # left → center (inclusive)
-            if center > left:
-                x = torch.linspace(0, 1, center - left + 1, device=self.torch_device)
-                grad_array[i, left:center + 1] = x
+            m = self.protocol_params['num_coefficients']
+            num_steps = self.sim_params['num_steps']
+            # Anchor indices: [0, 1, ..., num_steps - 1, num_steps]
+            internal_anchors = torch.linspace(1, num_steps - 1, m, device=self.torch_device).long()
+            full_anchors = torch.cat([
+                torch.tensor([0], device=self.torch_device),
+                internal_anchors,
+                torch.tensor([num_steps], device=self.torch_device)
+            ])
 
-            # center → right (inclusive)
-            if right > center:
-                x = torch.linspace(1, 0, right - center + 1, device=self.torch_device)
-                grad_array[i, center:right + 1] = x
 
-        return grad_array
+
+            for i in range(m):
+                left = full_anchors[i].item()
+                center = full_anchors[i + 1].item()
+                right = full_anchors[i + 2].item()
+
+                # left → center (inclusive)
+                if center > left:
+                    x = torch.linspace(0, 1, center - left + 1, device=self.torch_device)
+                    self.protocol_grad_array[i, left:center + 1] = x
+
+                # center → right (inclusive)
+                if right > center:
+                    x = torch.linspace(1, 0, right - center + 1, device=self.torch_device)
+                    self.protocol_grad_array[i, center:right + 1] = x
+
+            return self.protocol_grad_array
 
     def potential_protocol_grad_array(self, potential_array, advance=False):
         da_cn = 1*self.protocol_grad()
@@ -398,11 +241,11 @@ class grad_calc_WIP:
         return mw
 
 
-    def work_protocol_grad(self, dpotential_array, dpotential_advance_array, drift_protocol_grad_array, noise_array):
+    def work_protocol_grad(self, potential_array, potential_advance_array, dpotential_array, dpotential_advance_array, drift_protocol_grad_array, noise_array):
         dwp =self.potential_diff_protocol_grad_array(dpotential_array, dpotential_advance_array).sum(axis=2).mean(axis=1)
-        w = self.work_array(dpotential_array, dpotential_advance_array).sum(axis=1)
+        w = self.work_array(potential_array, potential_advance_array).sum(axis=1)
         mw = self.malliavian_weight_array(drift_protocol_grad_array, noise_array).sum(axis=2)
-        dpw = (w * mw).mean(axis=-1)
+        dpw = (w * mw).mean(axis=1)
         return dwp + dpw
     
     def current_grad(self, current, drift_grad_value, noise_array):
@@ -419,10 +262,10 @@ class DerivativeArrays:
         self.parameter_lists = p_lists
         self.parameter_endpoint_lists = p_endpoints
         self.num_parameters = len(p_lists)
-        self.torch_device = torch.device('cuda' if torch.cuda.is_available() else 'mps')
+        self.torch_device = phase_data.device
     
     def get_protocol_values(self):
-        return [ piecewise_protocol_value(self.num_steps, p_item, p_endpoint) for p_item, p_endpoint in zip(self.parameter_lists, self.parameter_endpoint_lists) ]
+        return [ piecewise_protocol_value(self.num_steps, p_item, p_endpoint, torch_device=self.torch_device) for p_item, p_endpoint in zip(self.parameter_lists, self.parameter_endpoint_lists) ]
 
     def get_array(self, function, advance=False):
         if advance:
@@ -524,12 +367,11 @@ class bit_flip(DerivativeArrays):
         return -1 * coordinates[...,0]**2
     
     def distance_sq_current(self, coordinates, protocol_values, order=2):
-        # Calculate the distance squared, the coordinates must be categorized into left and right paths in advance!
         target = (coordinates[:, 0, 0] < 0) * self.centers - (coordinates[:, 0, 0] > 0) * self.centers
         distance_sq = (coordinates[:,-1,0] - target)**order
         return distance_sq
     
-    def var_current(self, coordinates, protocol_values):
+    def var_current_separation(self, coordinates, protocol_values):
         # Calculate the variance of the current, the coordinates must be categorized into left and right paths in advance!
         num_left = torch.sum(coordinates[:, 0, 0] < 0)
         num_right = torch.sum(coordinates[:, 0, 0] > 0)
@@ -538,8 +380,17 @@ class bit_flip(DerivativeArrays):
         var[num_left:] = (coordinates[num_left:, -1, 0] - coordinates[num_left:, -1, 0].mean())**2
         return var
     
+    def var_current(self, coordinates, protocol_values):
+        # Calculate the variance of the current,
+        left = coordinates[:, 0, 0] < 0
+        right = coordinates[:, 0, 0] > 0
+        var = torch.zeros(coordinates.shape[0], device=coordinates.device)
+        var[left] = (coordinates[left, -1, 0] - coordinates[left, -1, 0].mean())**2
+        var[right] = (coordinates[right, -1, 0] - coordinates[right, -1, 0].mean())**2
+        return var
+    
     def var_abs_current(self, coordinates, protocol_values):
-        # Calculate the variance of the absolute value of the current, the coordinates must be categorized into left and right paths in advance!
+        # Calculate the variance of the absolute value of the current
         coordinates_abs = torch.abs(coordinates[:,-1,0])
         mean_abs = coordinates_abs.mean()
         return (coordinates_abs - mean_abs)**2

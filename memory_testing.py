@@ -12,7 +12,8 @@ def script1(N = iterations, L = data_size):
     means = []
     x1 = torch.empty( size=(1, int(L) ), requires_grad=True, device='mps') 
     for i in range(N):
-        x1.data = torch.normal(0,1,size=(1,N))
+        x1.data = torch.normal(0,1,size=(1,N)).to('mps')
+        print(x1.device)
         b = x1**2
         b.sum().backward()
         means.append(x1.grad.mean())
@@ -23,6 +24,7 @@ def script2(N = iterations, L = data_size):
     means = []
     for i in range(N):
         x1 = torch.normal(0,1,size=(1,int(L) ), requires_grad=True, device='mps')
+        print(x1.device)
         b = x1**2
         b.sum().backward()
         means.append(x1.grad.mean())
