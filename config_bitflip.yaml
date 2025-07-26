@@ -7,10 +7,10 @@ simulation_params:
   beta: 1.0                  # 1 / kBT
 
 training_params:
-  alpha: 1.0
+  alpha: 2.0
   alpha_1: 2.0
   alpha_2: 2.0
-  learning_rate: .1
+  learning_rate: .3
   batch_size: 10000
   training_iterations: 250
 
