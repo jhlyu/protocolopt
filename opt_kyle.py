@@ -151,7 +151,45 @@ class quartic_simulation:
             phase_array[:,i + 1, 1] = phase_array[:, i, 1] - dt * gamma * phase_array[:, i, 1] - dt * (4 * protocol_a_value[i] * phase_array[:, i, 0]**3 - 2 * protocol_b_value[i] * phase_array[:,i,0] ) + noise_array[:,i]
         return phase_array, noise_array
 
+class quadratic_simulation_od:
+    """
+    A class to generate trajectories for a particle in quadratic potential 
+    The potential has the form V(x,t) = 1/2*(x(t) - a(t))^2.
+    The force is phi(t) = -(x(t) - a(t)).
+    """
+    def __init__(self, num_paths, params, a_list, a_endpoints, device=torch.device('cuda' if torch.cuda.is_available() else 'mps')):
+        self.params = params
+        self.a_list = a_list
+        self.a_endpoints = a_endpoints
+        self.num_paths = num_paths
+        self.torch_device = device
+        self.initial_var = 1 / ( self.params['beta'] )
 
+    def trajectory_generator(self):
+        """
+        Generates trajectories with protocol.
+        The potential has the form V(x,t) = 1/2*(x(t) - a(t))^2.
+        The force is phi(t) =  -(x(t) - a(t)).
+        
+        Returns:
+            trajectory array and the noise array with [path_index , step_index, 2].
+            The [...,1] is always 0, since the velocity is not used in this simulation.
+        """
+        #time = np.linspace(0, num_steps * dt, num_steps + 1)
+        num_steps = self.params['num_steps']
+        dt = self.params['dt']
+        noise_sigma = torch.sqrt(torch.tensor(2.0 / self.params['beta'], device=self.torch_device)) # noise standard deviation
+
+        protocol_a_value = piecewise_protocol_value(num_steps, self.a_list, self.a_endpoints)
+        noise_array = torch.randn(self.num_paths, num_steps, device=self.torch_device) * (noise_sigma * math.sqrt(self.params['dt']))
+        phase_array = torch.zeros((self.num_paths, num_steps + 1, 2), device=self.torch_device) # 2 for position and zeros
+        phase_array[:, 0, 0] = torch.randn(self.num_paths, device=self.torch_device) * math.sqrt(self.initial_var) # initial position
+        
+        for i in range(num_steps):
+            # Update position using the Euler-Maruyama method
+            # dx = -(x-a)dt+ noise
+            phase_array[:,i + 1, 0] = phase_array[:, i, 0] - dt * (phase_array[:, i, 0] - protocol_a_value[i]) + noise_array[:,i]
+        return phase_array, noise_array
 
 class grad_calc:
     def __init__(self, sim_params, protocol_params, device = torch.device('cuda' if torch.cuda.is_available() else 'mps') ):
@@ -431,3 +469,29 @@ class bit_erasure(DerivativeArrays):
 
     def dV_c(self, coordinates, protocol_values):
         return 1 * coordinates[...,0]
+    
+class moving_harmonic(DerivativeArrays):
+    def __init__(self, params, phase_data, a_list, a_endpoints):
+        super().__init__(params, phase_data, [a_list], [a_endpoints])
+
+        self.set_derivative_methods()
+    """
+    The potential is V(x) = 1/2 * (x(t) - a(t))^2
+    The potential gradients are d_a V = -(x(t) - a(t))
+    The drift is F = -d_x V = - (x(t) - a(t))
+    The drift gradients are d_a F = 1
+    """
+    def potential_function(self, coordinates, protocol_values):
+        protocol_a = protocol_values
+        potential = 1/2 * (coordinates[...,0] - protocol_values[0])**2
+        return potential
+    
+    def dF_a(self, coordinates, protocol_values):
+        return torch.ones_like(coordinates[...,0])
+
+    def dV_a(self, coordinates, protocol_values):
+        return -1 * (coordinates[...,0] - protocol_values[0])
+
+    def distance_sq_current(self, coordinates, protocol_values, target, order=2):
+        distance_sq = (coordinates[:,-1,0] - target)**order
+        return distance_sq

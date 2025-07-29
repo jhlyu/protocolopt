@@ -1,0 +1,28 @@
+simulation_params:
+  dt: 0.001
+  num_steps: 1000
+  gamma: 0.1
+  mass: 1.0
+  beta: 1.0                  # 1 / kBT
+
+training_params:
+  alpha: 1.0
+  alpha_1: 2.0
+  alpha_2: 0.5
+  learning_rate: 0.01
+  batch_size: 8000
+  training_iterations: 1500
+
+protocol_params:
+  num_coefficients: 10
+
+  a_endpoints: [0.0, 1.0]
+  b_endpoints: [0.0, 0.0]
+  c_endpoints: [0.0, 0.0]
+
+save_directory: "./results/move/"  
+'initilize_to_mc': False
+
+report_frequency: 10
+checkpoint_frequency: 50
+plot_frequency: 100
