@@ -189,9 +189,10 @@ for step in range(training_params['training_iterations']):
 
     # Save the lists after training using JSON
     if checkpoint_boolean or plot_boolean:
+        checkpoint_dir = save_dir + f'checkpoint_{total_iterations:05}/'
         print(f"Saving checkpoint at step {step}, total_iter {total_iterations}...")
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
+        if not os.path.exists(checkpoint_dir):
+            os.makedirs(checkpoint_dir)
 
         # Save the training metrics
         metrics = {
@@ -202,18 +203,24 @@ for step in range(training_params['training_iterations']):
                 'a_list_history': a_list_history,
                 'b_list_history': b_list_history
             }
-        with open(save_dir + 'training_metrics.json', 'w') as f:
-            json.dump(metrics, f)   
+        # Save the metrics and checkpoint in both directories
+        # save_dir is always a copy of the most recent checkpoint
+        # checkpoint_dir saves the current state in a direcotry for later plotting and analysis
+        for directory in [save_dir, checkpoint_dir]:
+
+            with open(directory + 'training_metrics.json', 'w') as f:
+                json.dump(metrics, f)   
 
 
-        torch.save({
-            'a_list': protocol_params['a_list'],
-            'b_list': protocol_params['b_list'],
-            'optimizer_b_dict': optimizer_b.state_dict(),
-            'optimizer_a_dict': optimizer_a.state_dict(),
-        }, save_dir + 'work_checkpoint.pt') 
+            torch.save({
+                'a_list': protocol_params['a_list'],
+                'b_list': protocol_params['b_list'],
+                'optimizer_b_dict': optimizer_b.state_dict(),
+                'optimizer_a_dict': optimizer_a.state_dict(),
+            }, directory + 'work_checkpoint.pt') 
 
-        shutil.copyfile(args.config, save_dir + 'config.yaml')
+            shutil.copyfile(args.config, directory + 'config.yaml')
+        
         print("Checkpoint saved.")
 
         if plot_boolean:
