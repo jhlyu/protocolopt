@@ -9,8 +9,9 @@ import math
 import argparse
 import shutil
 import subprocess
+from torch.optim import lr_scheduler
 
-parser = argparse.ArgumentParser(description='Run memory test on MPS tensors.')
+parser = argparse.ArgumentParser()
 parser.add_argument('config', type=str, default='config.yaml', help='Path to the configuration file.')
 args = parser.parse_args()
 print(f"Running optimization from {args.config}")
@@ -23,8 +24,6 @@ simulation_params = config["simulation_params"]
 protocol_params = config["protocol_params"]
 training_params = config["training_params"]
 save_dir = config['save_directory'] 
-initilize_to_mc = config['initilize_to_mc']
-
 
 simulation_params['noise_sigma'] = math.sqrt(2 * simulation_params['gamma'] / simulation_params['beta'])  # od Einstein relation
 centers = math.sqrt(protocol_params['b_endpoints'][0]/(2*protocol_params['a_endpoints'][0]))
@@ -74,12 +73,20 @@ if os.path.exists(save_dir + 'work_checkpoint.pt'):
 else:
     protocol_params['a_list'] = torch.zeros(protocol_params['num_coefficients'], device=torch_device, requires_grad=True)
     protocol_params['b_list'] = torch.zeros(protocol_params['num_coefficients'], device=torch_device, requires_grad=True)
-    if initilize_to_mc:
-        analytic_k = torch.pi**2 * simulation_params['mass'] / (simulation_params['dt']*simulation_params['num_steps'])
+    if config['initilize_to_mc']:
+        analytic_k = torch.pi**2 * simulation_params['mass'] / (simulation_params['dt']*simulation_params['num_steps'])**2
+        #correct for damping
+        analytic_k += simulation_params['gamma']**2 / 4*simulation_params['mass']
         protocol_params['b_list'].data[:] = torch.tensor( [-analytic_k / 2 for i in range(protocol_params['num_coefficients'])] )
 
     optimizer_a = torch.optim.Adam([protocol_params['a_list']], lr=training_params['learning_rate'])
     optimizer_b = torch.optim.Adam([protocol_params['b_list']], lr=training_params['learning_rate'])
+
+    if config.get('use_adaptive_lr', False):
+        lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
+        scheduler_a = lr_scheduler.StepLR(optimizer_a, step_size=100, gamma=0.9)
+        scheduler_b = lr_scheduler.StepLR(optimizer_b, step_size=100, gamma=0.9)
+
     print("Initialized new alist and blist.")
 
 
@@ -157,7 +164,11 @@ for step in range(training_params['training_iterations']):
         potential_value_advance_grad.data = potential_advance_function()
         
         # Calculate the gradients
-        work_grad = grad.work_protocol_grad(potential_value, potential_value_advance, potential_value_grad, potential_value_advance_grad, drift_protocol_grad, noise)
+        work_target = None
+        if config.get('use_work_target', False):
+            work_target = bitflip.heuristic_work_target()
+
+        work_grad = grad.work_protocol_grad(potential_value, potential_value_advance, potential_value_grad, potential_value_advance_grad, drift_protocol_grad, noise, target=work_target)
         distance_grad = grad.current_grad(distance_sq_current, drift_protocol_grad, noise)
         var_grad = grad.current_grad(var_current, drift_protocol_grad, noise)
         param_grad = training_params['alpha_2'] * work_grad + training_params['alpha'] * distance_grad + training_params['alpha_1'] * var_grad
@@ -178,11 +189,15 @@ for step in range(training_params['training_iterations']):
     
     optimizer_a.step()
     optimizer_b.step()
+    if config.get('use_adaptive_lr', False):
+        scheduler_a.step()
+        scheduler_b.step()
 
     total_iterations = len(mean_distance_list)
     if step % config['report_frequency'] == 0:
         print(f"Step {step}: a = {protocol_params['a_list']}, b = {protocol_params['b_list']}, x = {distance_loss}, abs_var = {var_loss}, work = {work_mean}, total loss = {total_loss}")
-
+        if step == 0 and work_target != None:
+            print(f"Work Target = {work_target:.3f}")
     #check to see if we want to plot or checkpoint this iteration
     checkpoint_boolean = total_iterations % config['checkpoint_frequency'] == 0 or step == training_params['training_iterations'] - 1 or total_iterations == 1
     plot_boolean = total_iterations % config['plot_frequency'] == 0 or step == training_params['training_iterations'] - 1 or total_iterations == 1

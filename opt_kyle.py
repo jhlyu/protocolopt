@@ -279,12 +279,15 @@ class grad_calc:
         return mw
 
 
-    def work_protocol_grad(self, potential_array, potential_advance_array, dpotential_array, dpotential_advance_array, drift_protocol_grad_array, noise_array):
+    def work_protocol_grad(self, potential_array, potential_advance_array, dpotential_array, dpotential_advance_array, drift_protocol_grad_array, noise_array, target=None):
         dwp =self.potential_diff_protocol_grad_array(dpotential_array, dpotential_advance_array).sum(axis=2).mean(axis=1)
         w = self.work_array(potential_array, potential_advance_array).sum(axis=1)
         mw = self.malliavian_weight_array(drift_protocol_grad_array, noise_array).sum(axis=2)
         dpw = (w * mw).mean(axis=1)
-        return dwp + dpw
+        if target == None:
+            return dwp + dpw
+        else:
+            return (dwp + dpw) * 2 * (w.mean()- target)
     
     def current_grad(self, current, drift_grad_value, noise_array):
         malliavian_weight = self.malliavian_weight_array(drift_grad_value, noise_array).sum(axis=2)
@@ -403,6 +406,9 @@ class bit_flip(DerivativeArrays):
     
     def dV_b(self, coordinates, protocol_values):
         return -1 * coordinates[...,0]**2
+    
+    def heuristic_work_target(self):
+        return 4 * self.params['gamma'] * self.centers**2 / (self.params['dt'] * self.params['num_steps'])
     
     def distance_sq_current(self, coordinates, protocol_values, order=2):
         target = (coordinates[:, 0, 0] < 0) * self.centers - (coordinates[:, 0, 0] > 0) * self.centers

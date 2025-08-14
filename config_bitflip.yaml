@@ -7,23 +7,25 @@ simulation_params:
   beta: 1.0                  # 1 / kBT
 
 training_params:
-  alpha: 2.0
+  alpha: 4.0
   alpha_1: 2.0
   alpha_2: 2.0
-  learning_rate: .3
+  learning_rate: .01
   batch_size: 10000
-  training_iterations: 250
+  training_iterations: 400
 
 protocol_params:
-  num_coefficients: 10
+  num_coefficients: 16
 
-  a_endpoints: [10.0, 10.0]
+  a_endpoints: [5.0, 5.0]
   b_endpoints: [20.0, 20.0]
   c_endpoints: [0.0, 0.0]
 
-save_directory: "./results/"  
-'initilize_to_mc': False
+save_directory: "./results_8_10_target/"  
+'initilize_to_mc': True
+'use_work_target': True
+'use_adaptive_lr': True
 
 report_frequency: 10
-checkpoint_frequency: 50
-plot_frequency: 100
+checkpoint_frequency: 100
+plot_frequency: 200
